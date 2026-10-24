@@ -144,6 +144,16 @@ enum TrafficSource {
   IMPORT
 }
 
+/// Which half of an Xray reverse-proxy pair a row represents.
+///
+/// The PORTAL listens on the node that needs connectivity (Iran); the BRIDGE
+/// dials it from the node that has it (Foreign). Together they form the
+/// Iran→Foreign tunnel this integration exists for.
+enum ReverseProxyRole {
+  BRIDGE
+  PORTAL
+}
+
 // -----------------------------------------------------------------------------
 // Identity & access
 // -----------------------------------------------------------------------------
@@ -270,11 +280,15 @@ model Server {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  configs       Configuration[]
-  tunnels       Tunnel[]
-  trafficUsage  TrafficUsage[]
-  metrics       ServerMetric[]
-  subscriptions Subscription[]
+  configs        Configuration[]
+  tunnels        Tunnel[]
+  inbounds       Inbound[]
+  outbounds      Outbound[]
+  routingRules   RoutingRule[]
+  reverseProxies ReverseProxy[]
+  trafficUsage   TrafficUsage[]
+  metrics        ServerMetric[]
+  subscriptions  Subscription[]
 
   @@unique([hostname, port])
   @@index([status])
@@ -430,6 +444,148 @@ model Tunnel {
   @@index([serverId])
   @@index([enabled])
   @@map("tunnels")
+}
+
+// -----------------------------------------------------------------------------
+// Advanced Xray objects (3x-ui parity)
+//
+// These sit BESIDE the managed Configuration / Tunnel tables. A Configuration is
+// a customer-facing endpoint with users, credentials and accounting; an
+// Inbound / Outbound / RoutingRule / ReverseProxy is a RAW Xray object the
+// operator adds by hand (an Iran→Foreign tunnel, an outbound chain, a routing
+// rule). Nothing here is required for the panel to work: the tables are new and
+// the relations are additive. Phase 2 merges these rows into config.json WITHOUT
+// touching the generated base configuration.
+// -----------------------------------------------------------------------------
+
+/// A raw Xray inbound managed by hand, beyond the wizard-generated ones.
+///
+/// `settings` / `streamSettings` / `sniffing` are stored verbatim as JSON so any
+/// Xray feature can be expressed without a schema change. Phase 2 validates them
+/// against the binary (`xray run -test`) before they reach config.json.
+model Inbound {
+  id       String @id @default(cuid())
+  name     String
+  serverId String
+  server   Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  /// Xray inbound tag. MUST be unique per server — two inbounds sharing a tag
+  /// make Xray refuse to start entirely, taking every port down.
+  tag      String
+  protocol String @default("vless")
+  listen   String @default("0.0.0.0")
+  port     Int
+
+  /// Raw Xray sections (an object each). Merged into config.json in Phase 2.
+  settings       Json @default("{}")
+  streamSettings Json @default("{}")
+  sniffing       Json @default("{}")
+
+  enabled   Boolean @default(true)
+  /// Render order, so a hand-written list stays readable.
+  sortOrder Int     @default(0)
+  remarks   String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([serverId, tag])
+  @@index([serverId, enabled])
+  @@map("inbounds")
+}
+
+/// A raw Xray outbound (freedom, blackhole, vless, vmess, trojan, …).
+model Outbound {
+  id       String @id @default(cuid())
+  name     String
+  serverId String
+  server   Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  tag            String
+  protocol       String  @default("freedom")
+  settings       Json    @default("{}")
+  streamSettings Json    @default("{}")
+  /// Optional local address Xray binds when dialing out.
+  sendThrough    String?
+
+  enabled   Boolean @default(true)
+  sortOrder Int     @default(0)
+  remarks   String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([serverId, tag])
+  @@index([serverId, enabled])
+  @@map("outbounds")
+}
+
+/// One entry of Xray's `routing.rules[]`.
+///
+/// Fields mirror the Xray rule schema exactly; Phase 2 maps them onto
+/// `inboundTag` / `sourceIP` (Xray's spelling) when it renders the node config.
+model RoutingRule {
+  id       String @id @default(cuid())
+  name     String
+  serverId String
+  server   Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  /// Evaluation order — lower runs first. Mirrors the array position in Xray.
+  sortOrder Int     @default(0)
+  enabled   Boolean @default(true)
+
+  outboundTag String?
+  balancerTag String?
+  /// Xray `inboundTag` (an array).
+  inboundTags String[] @default([])
+  domain      String[] @default([])
+  ip          String[] @default([])
+  port        String?
+  /// Xray `sourceIP` (an array).
+  sourceIp    String[] @default([])
+  sourcePort  String?
+  protocol    String[] @default([])
+  /// "tcp", "udp" or "tcp,udp".
+  network     String?
+
+  remarks String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([serverId, enabled, sortOrder])
+  @@map("routing_rules")
+}
+
+/// One half of Xray's `reverse` block (`reverse.bridges[]` or `reverse.portals[]`).
+///
+/// For an Iran→Foreign tunnel: a PORTAL row on the Iran node and a BRIDGE row on
+/// the Foreign node, each carrying the peer address in `domain`.
+model ReverseProxy {
+  id       String @id @default(cuid())
+  name     String
+  serverId String
+  server   Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  role   ReverseProxyRole
+  /// Xray tag for this bridge/portal. Unique per server.
+  tag    String
+  /// Peer address Xray dials (the opposite side of the tunnel).
+  domain String
+
+  enabled Boolean @default(true)
+  remarks String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([serverId, tag])
+  @@index([serverId, role])
+  @@map("reverse_proxies")
 }
 
 // -----------------------------------------------------------------------------

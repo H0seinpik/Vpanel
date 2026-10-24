@@ -19,6 +19,7 @@ import { planPortSharing, resolvePortLayout } from '@/services/port-sharing';
 import { parseX25519Output, serverRealitySettings } from '@/services/reality';
 import { assertRenderIsApplicable, decideEmptyRender } from '@/services/render-guard';
 import { mayWriteNodeConfig } from '@/services/worker-lock';
+import { loadAdvancedObjects, mergeAdvancedObjects } from './xray-advanced';
 
 /**
  * Xray supervisor.
@@ -441,6 +442,11 @@ export async function renderXrayConfig(
     orderBy: { createdAt: 'asc' },
   });
 
+  // Operator-managed raw objects (Inbounds / Outbounds / Routing / Reverse).
+  // Loaded here and merged at the very END, so the generated base is assembled
+  // exactly as it always was.
+  const advanced = await loadAdvancedObjects();
+
   const inbounds: XrayInbound[] = [];
   const usedTags = new Set<string>();
   const skipped: string[] = [];
@@ -580,7 +586,12 @@ export async function renderXrayConfig(
     if (inbound.tag) tunnelTags.push(inbound.tag);
   }
 
-  if (inbounds.length === 0 && tunnels.length === 0) {
+  if (
+    inbounds.length === 0 &&
+    tunnels.length === 0 &&
+    advanced.inbounds.length === 0 &&
+    advanced.reverse.length === 0
+  ) {
     return { config: null, inbounds: 0, ports: [], skipped, tunnelErrors };
   }
 
@@ -635,10 +646,17 @@ export async function renderXrayConfig(
     },
   };
 
-  const publicPorts = [...new Set([...byPort.keys(), ...tunnelPorts])].filter((port) => port > 0);
+  // Append the operator-managed objects. The base arrays are never reordered or
+  // replaced — see `xray-advanced.ts` for the merge contract.
+  const merged = mergeAdvancedObjects(config, advanced);
+  if (merged.warnings.length > 0) skipped.push(...merged.warnings);
+
+  const publicPorts = [...new Set([...byPort.keys(), ...tunnelPorts, ...merged.ports])].filter(
+    (port) => port > 0,
+  );
   return {
-    config,
-    inbounds: inbounds.length + tunnels.length,
+    config: merged.config,
+    inbounds: inbounds.length + tunnels.length + merged.counts.inbounds,
     ports: publicPorts,
     skipped,
     tunnelErrors,

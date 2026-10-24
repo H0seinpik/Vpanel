@@ -1,0 +1,161 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Design tokens.
+ *
+ * Light theme is the default; `.dark` on <html> switches to the dark palette.
+ * Colours are HSL triples consumed by Tailwind (see tailwind.config.ts).
+ */
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: 243 75% 59%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 199 89% 48%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 32 95% 44%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 243 75% 59%;
+
+    --radius: 0.65rem;
+
+    --sidebar: 222 47% 11%;
+    --sidebar-foreground: 210 40% 96%;
+    --sidebar-muted: 217 33% 62%;
+    --sidebar-active: 243 75% 59%;
+
+    --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  .dark {
+    --background: 222 47% 8%;
+    --foreground: 210 40% 96%;
+
+    --card: 222 40% 11%;
+    --card-foreground: 210 40% 96%;
+
+    --popover: 222 40% 11%;
+    --popover-foreground: 210 40% 96%;
+
+    --primary: 243 75% 65%;
+    --primary-foreground: 222 47% 8%;
+
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 96%;
+
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 199 89% 55%;
+    --accent-foreground: 222 47% 8%;
+
+    --destructive: 0 63% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 65% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 32 90% 52%;
+    --warning-foreground: 222 47% 8%;
+
+    --border: 217 33% 20%;
+    --input: 217 33% 20%;
+    --ring: 243 75% 65%;
+
+    --sidebar: 222 47% 6%;
+    --sidebar-foreground: 210 40% 96%;
+    --sidebar-muted: 217 20% 58%;
+    --sidebar-active: 243 75% 65%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans);
+  }
+
+  /* Consistent focus treatment for keyboard users. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  /* Slim, unobtrusive scrollbars. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-border;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/40;
+  }
+}
+
+@layer components {
+  /* Text progress bar used in tables, e.g. ████████░░ 80% */
+  .progress-track {
+    @apply h-2 w-full overflow-hidden rounded-full bg-muted;
+  }
+  .progress-fill {
+    @apply h-full rounded-full transition-[width] duration-500;
+  }
+
+  .card-surface {
+    @apply rounded-lg border border-border bg-card text-card-foreground shadow-sm;
+  }
+
+  .stat-value {
+    @apply text-2xl font-semibold tracking-tight tabular-nums;
+  }
+
+  .table-scroll {
+    @apply w-full overflow-x-auto;
+  }
+}
+
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

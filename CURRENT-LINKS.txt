@@ -1,0 +1,36 @@
+==========================================================================
+ لینک‌های فعلی همهٔ کانفیگ‌ها — همین‌ها را در اپ import کن
+==========================================================================
+
+--- Server 01 · VMESS  (VMESS · پورت 443 · xhttp / none) ---
+  [guest1]
+vmess://eyJ2IjoiMiIsInBzIjoiU2VydmVyIDAxIMK3IFZNRVNTIiwiYWRkIjoiMTk1LjI0OC4yNDEuMjUxIiwicG9ydCI6IjQ0MyIsImlkIjoiMjIzOWUzMTktZjU2NC00MjQ2LThlMjYtNGIyNTI2ODU0NTBhIiwiYWlkIjoiMCIsInNjeSI6ImF1dG8iLCJuZXQiOiJ4aHR0cCIsInR5cGUiOiJub25lIiwiaG9zdCI6IiIsInBhdGgiOiIiLCJ0bHMiOiIiLCJzbmkiOiIiLCJhbHBuIjoiIiwiZnAiOiJjaHJvbWUifQ==
+
+--- Server 01 · VMESS  (VMESS · پورت 8443 · xhttp / none) ---
+  [admin]
+vmess://eyJ2IjoiMiIsInBzIjoiU2VydmVyIDAxIMK3IFZNRVNTIiwiYWRkIjoiMTk1LjI0OC4yNDEuMjUxIiwicG9ydCI6Ijg0NDMiLCJpZCI6IjJjNTBkZjM0LTk4NzQtNDYyOC04YTdiLTUzNzQzMjA3N2JmOCIsImFpZCI6IjAiLCJzY3kiOiJhdXRvIiwibmV0IjoieGh0dHAiLCJ0eXBlIjoibm9uZSIsImhvc3QiOiIiLCJwYXRoIjoiIiwidGxzIjoiIiwic25pIjoiIiwiYWxwbiI6IiIsImZwIjoiY2hyb21lIn0=
+
+--- Server 01 · VMESS  (VMESS · پورت 2083 · tcp / none) ---
+  [guest1]
+vmess://eyJ2IjoiMiIsInBzIjoiU2VydmVyIDAxIMK3IFZNRVNTIiwiYWRkIjoiMTk1LjI0OC4yNDEuMjUxIiwicG9ydCI6IjIwODMiLCJpZCI6ImMyOTJlNTA2LTc1NzAtNDg2Yi1iMmIzLWYxNTYxM2NmYWViMyIsImFpZCI6IjAiLCJzY3kiOiJhdXRvIiwibmV0IjoidGNwIiwidHlwZSI6Im5vbmUiLCJob3N0IjoiIiwicGF0aCI6IiIsInRscyI6IiIsInNuaSI6IiIsImFscG4iOiIiLCJmcCI6ImNocm9tZSJ9
+
+--- Server 01 · VLESS  (VLESS · پورت 2087 · tcp / none) ---
+  [guest1]
+vless://1990029f-b217-4cae-bf92-8544ca25e59c@195.248.241.251:2087?type=tcp&security=none#Server%2001%20%C2%B7%20VLESS
+
+--- Server 01 · TROJAN  (TROJAN · پورت 2053 · tcp / tls) ---
+  [guest1]
+trojan://NTLjLQbckG92TbhpPGgMacam@195.248.241.251:2053?type=tcp&security=tls&fp=chrome&pinnedPeerCertSha256=24098dd21a1a8f23f9d8ed96fb5f943479f718c8fd18ce418e1bad5b7502fd72#Server%2001%20%C2%B7%20TROJAN
+
+--- Server 01 · VMESS  (VMESS · پورت 2096 · xhttp / none) ---
+  [guest1]
+vmess://eyJ2IjoiMiIsInBzIjoiU2VydmVyIDAxIMK3IFZNRVNTIiwiYWRkIjoiMTk1LjI0OC4yNDEuMjUxIiwicG9ydCI6IjIwOTYiLCJpZCI6IjczZDc4YWQ4LTFiYWMtNGI1ZC1hYjM5LTcwMDkzMjYyMmI1YSIsImFpZCI6IjAiLCJzY3kiOiJhdXRvIiwibmV0IjoieGh0dHAiLCJ0eXBlIjoibm9uZSIsImhvc3QiOiIiLCJwYXRoIjoiIiwidGxzIjoiIiwic25pIjoiIiwiYWxwbiI6IiIsImZwIjoiY2hyb21lIn0=
+
+--------------------------------------------------------------------------
+ یادآوری‌ها
+--------------------------------------------------------------------------
+  • لینک‌ها دقیقاً همان چیزی هستند که Xray اجرا می‌کند — هیچ پارامتر اضافه‌ای نیست.
+  • اگر لینک قدیمی روی گوشی داری، پروفایل را پاک کن و این لینک‌ها را از نو import کن.
+  • برای مشتری جدید، همان کانفیگ را در پنل باز کن و Add user بزن — هر کاربر
+    لینک مخصوص خودش را از همان یک پورت می‌گیرد. کانفیگ دوم روی آن پورت نساز.
+  • حدود ۳۰ ثانیه بعد از Add user صبر کن تا لینکش روی نود فعال شود.

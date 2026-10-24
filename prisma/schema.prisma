@@ -1,0 +1,611 @@
+// =============================================================================
+// VPanel — Prisma schema
+// Administrative panel for managing AUTHORIZED V2Ray/Xray proxy configurations.
+// Only servers explicitly registered by an administrator are ever managed.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+
+  // NOTE: `directUrl` is deliberately NOT set.
+  //
+  // It is only needed when `url` points at a connection pooler (PgBouncer, or a
+  // hosted proxy) and migrations must bypass that pooler. VPanel talks straight
+  // to a single PostgreSQL instance, so the extra variable would be a required
+  // setting that buys nothing - and a missing one breaks `migrate deploy` while
+  // `generate` still succeeds, which is a confusing failure.
+  //
+  // If you later put a pooler in front of the database, add it back and set the
+  // variable in .env:
+  //   directUrl = env("DIRECT_URL")
+}
+
+// -----------------------------------------------------------------------------
+// Enums
+// -----------------------------------------------------------------------------
+
+enum UserRole {
+  ADMIN
+  OPERATOR
+  USER
+}
+
+enum UserStatus {
+  ACTIVE
+  EXPIRED
+  TRAFFIC_EXCEEDED
+  DISABLED
+  SUSPENDED
+}
+
+enum ServerStatus {
+  PENDING
+  ONLINE
+  OFFLINE
+  WARNING
+  DISABLED
+}
+
+/// Supported node flavours. New types are additive — the provider layer maps
+/// each `ServerType` to a concrete provider implementation.
+enum ServerType {
+  XRAY
+  V2RAY
+  GENERIC
+}
+
+enum ProtocolType {
+  VLESS
+  VMESS
+  TROJAN
+  SHADOWSOCKS
+}
+
+enum ConfigStatus {
+  ACTIVE
+  /// Switched off by an administrator. Never reverted automatically.
+  DISABLED
+  EXPIRED
+  /// Stopped automatically because the configuration's own traffic ceiling was
+  /// reached. Reverted to ACTIVE when the ceiling is raised or usage is reset.
+  TRAFFIC_EXCEEDED
+}
+
+/// Transport accepted by a port-forwarding tunnel.
+///
+/// Xray's `tunnel` inbound (formerly `dokodemo-door`) can listen on TCP, UDP or
+/// both. Keeping this as an enum makes the renderer and the UI agree on the
+/// spelling and prevents a free-text value from reaching `allowedNetwork`.
+enum TunnelNetwork {
+  TCP
+  UDP
+  TCP_UDP
+}
+
+enum PlanStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  TRAFFIC_EXCEEDED
+  SUSPENDED
+  CANCELLED
+}
+
+enum QuotaType {
+  MONTHLY
+  TOTAL
+  UNLIMITED
+}
+
+enum DevicePlatform {
+  ANDROID
+  WINDOWS
+  LINUX
+  MACOS
+  IOS
+  OTHER
+}
+
+enum DeviceStatus {
+  ACTIVE
+  REVOKED
+  BLOCKED
+}
+
+enum NotificationSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum NotificationType {
+  TRAFFIC_THRESHOLD
+  TRAFFIC_EXCEEDED
+  EXPIRATION_WARNING
+  EXPIRED
+  SERVER_OFFLINE
+  SERVER_ONLINE
+  USER_SUSPENDED
+  SYSTEM
+}
+
+enum TrafficSource {
+  AGENT
+  MANUAL
+  IMPORT
+}
+
+// -----------------------------------------------------------------------------
+// Identity & access
+// -----------------------------------------------------------------------------
+
+/// Catalog of roles. The `key` mirrors the `UserRole` enum and drives server-side
+/// RBAC; the row itself lets an admin inspect/extend permission descriptions.
+model Role {
+  id          String   @id @default(cuid())
+  key         UserRole @unique
+  name        String
+  description String?
+  /// Human-readable list of granted capabilities (display + future custom roles).
+  permissions Json     @default("[]")
+  isSystem    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users User[]
+
+  @@map("roles")
+}
+
+model User {
+  id           String     @id @default(cuid())
+  username     String     @unique
+  displayName  String?
+  email        String     @unique
+  passwordHash String
+  role         UserRole   @default(USER)
+  status       UserStatus @default(ACTIVE)
+  notes        String?
+
+  /// Optional plan/subscription the user is currently bound to.
+  planId        String?
+  plan          Plan?          @relation(fields: [planId], references: [id], onDelete: SetNull)
+  subscriptions Subscription[]
+
+  roleId  String?
+  roleRef Role?   @relation(fields: [roleId], references: [id], onDelete: SetNull)
+
+  /// Denormalised counters kept in sync by the traffic worker for fast reads.
+  trafficUsedBytes  BigInt    @default(0)
+  trafficLimitBytes BigInt? // null = unlimited
+  expirationDate    DateTime?
+
+  lastLoginAt DateTime?
+  lastSeenAt  DateTime?
+  createdById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions      Session[]
+  devices       Device[]
+  configs       Configuration[]    @relation("ConfigOwner")
+  assignments   ConfigAssignment[]
+  trafficUsage  TrafficUsage[]
+  notifications Notification[]
+  auditLogs     AuditLog[]         @relation("AuditActor")
+  ownedPlans    Plan[]             @relation("PlanOwner")
+  createdUsers  User[]             @relation("UserCreator")
+  createdBy     User?              @relation("UserCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([role])
+  @@index([expirationDate])
+  @@index([createdAt])
+  @@map("users")
+}
+
+/// Refresh-token / session records. Refresh tokens are stored hashed and rotated.
+model Session {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// SHA-256 hash of the refresh token (never store the raw token).
+  tokenHash  String    @unique
+  userAgent  String?
+  ip         String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime  @default(now())
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// -----------------------------------------------------------------------------
+// Infrastructure
+// -----------------------------------------------------------------------------
+
+model Server {
+  id          String       @id @default(cuid())
+  name        String
+  hostname    String
+  ipAddress   String
+  port        Int          @default(443)
+  protocol    ProtocolType @default(VLESS)
+  type        ServerType   @default(XRAY)
+  location    String?
+  status      ServerStatus @default(PENDING)
+  description String?
+
+  /// Monitoring flags. Credentials are stored encrypted-at-rest by the operator
+  /// (or referenced via env) and are NEVER returned to the frontend.
+  monitoringEnabled Boolean @default(true)
+  agentEndpoint     String?
+  agentTokenCipher  String? // encrypted agent credential; never serialised
+
+  /// Cached live metrics so the UI does not need to hit the node on every render.
+  cpuPercent          Float?
+  memPercent          Float?
+  activeConnections   Int?   @default(0)
+  activeUsers         Int?   @default(0)
+  netInBytes          BigInt @default(0)
+  netOutBytes         BigInt @default(0)
+  totalBandwidthBytes BigInt @default(0)
+
+  lastHeartbeat DateTime?
+  lastError     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  configs       Configuration[]
+  tunnels       Tunnel[]
+  trafficUsage  TrafficUsage[]
+  metrics       ServerMetric[]
+  subscriptions Subscription[]
+
+  @@unique([hostname, port])
+  @@index([status])
+  @@index([type])
+  @@index([location])
+  @@map("servers")
+}
+
+/// Time-series samples for the monitoring page & charts.
+model ServerMetric {
+  id                String   @id @default(cuid())
+  serverId          String
+  server            Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  cpuPercent        Float?
+  memPercent        Float?
+  activeConnections Int      @default(0)
+  activeUsers       Int      @default(0)
+  netInBytes        BigInt   @default(0)
+  netOutBytes       BigInt   @default(0)
+  sampledAt         DateTime @default(now())
+
+  @@index([serverId, sampledAt])
+  @@map("server_metrics")
+}
+
+/// Catalog of protocol definitions the panel can generate. Kept as data so the
+/// configuration engine can be extended without shipping new code paths.
+model Protocol {
+  id            String       @id @default(cuid())
+  type          ProtocolType @unique
+  name          String
+  description   String?
+  enabled       Boolean      @default(true)
+  /// Default parameter values + UI field descriptors (see config-generator).
+  defaultParams Json         @default("{}")
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  configurations Configuration[]
+
+  @@map("protocols")
+}
+
+// -----------------------------------------------------------------------------
+// Configurations
+// -----------------------------------------------------------------------------
+
+model Configuration {
+  id         String       @id @default(cuid())
+  name       String
+  serverId   String
+  server     Server       @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  protocolId String
+  protocol   Protocol     @relation(fields: [protocolId], references: [id], onDelete: Restrict)
+  type       ProtocolType
+  status     ConfigStatus @default(ACTIVE)
+
+  /// Primary owner (single-user model). Multi-user configs additionally create
+  /// `ConfigAssignment` rows, each holding an independent credential.
+  ownerId String?
+  owner   User?   @relation("ConfigOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  /// Protocol-specific parameters validated by the configuration engine.
+  params Json @default("{}")
+
+  /// Traffic ceiling for THIS configuration, independent of any user quota.
+  /// null = unlimited. This is the figure that decides whether the
+  /// configuration keeps serving: reaching it sets the status to
+  /// TRAFFIC_EXCEEDED and the node stops offering it.
+  trafficLimitBytes BigInt?
+  /// Running total across every assignment. Maintained by the traffic recorder
+  /// so the list and the enforcement pass do not have to aggregate on read.
+  trafficUsedBytes  BigInt  @default(0)
+
+  /// Rendered artefacts cached for fast serving (regenerated on change).
+  shareLink String? @db.Text
+  rawConfig Json?
+  remarks   String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  assignments  ConfigAssignment[]
+  trafficUsage TrafficUsage[]
+
+  @@index([serverId])
+  @@index([type])
+  @@index([status])
+  @@index([ownerId])
+  @@map("configurations")
+}
+
+/// Per-user credential binding. Enables the "one configuration, many users"
+/// model while guaranteeing each user has an independent credential.
+model ConfigAssignment {
+  id               String        @id @default(cuid())
+  configId         String
+  config           Configuration @relation(fields: [configId], references: [id], onDelete: Cascade)
+  userId           String
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Credential for THIS user on THIS config (uuid / password / email …).
+  credential       Json          @default("{}")
+  shareLink        String?       @db.Text
+  status           ConfigStatus  @default(ACTIVE)
+  trafficUsedBytes BigInt        @default(0)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@unique([configId, userId])
+  @@index([userId])
+  @@index([configId])
+  @@map("config_assignments")
+}
+
+/// Port forwarding, deliberately separate from `Configuration`.
+///
+/// A configuration is a proxy endpoint with users, credentials, share links and
+/// per-user accounting. A tunnel has none of those: it forwards every byte that
+/// arrives on `listenPort` to `targetHost:targetPort` using Xray's `tunnel`
+/// protocol. Mixing the two would make every configuration query, link
+/// generator and assignment screen carry a "this row is not really a
+/// configuration" special case, so it gets its own table and its own page.
+model Tunnel {
+  id       String @id @default(cuid())
+  name     String
+  serverId String
+  server   Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  /// Interface to listen on. `0.0.0.0` accepts IPv4 from every interface.
+  listenAddress String        @default("0.0.0.0")
+  listenPort    Int
+  targetHost    String
+  targetPort    Int
+  network       TunnelNetwork @default(TCP)
+
+  enabled Boolean @default(true)
+  notes   String?
+
+  /// Reason the last reconcile could not serve this tunnel (port taken, etc.).
+  /// Maintained by the supervisor, never edited by hand.
+  lastError String?
+
+  /// Cumulative counters read from Xray's inbound statistics.
+  trafficUpBytes   BigInt @default(0)
+  trafficDownBytes BigInt @default(0)
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([serverId, listenPort])
+  @@index([serverId])
+  @@index([enabled])
+  @@map("tunnels")
+}
+
+// -----------------------------------------------------------------------------
+// Plans & subscriptions
+// -----------------------------------------------------------------------------
+
+model Plan {
+  id                String         @id @default(cuid())
+  name              String         @unique
+  description       String?
+  priceCents        Int            @default(0)
+  currency          String         @default("USD")
+  /// null = unlimited
+  trafficLimitBytes BigInt?
+  durationDays      Int            @default(30)
+  deviceLimit       Int            @default(1)
+  allowedProtocols  ProtocolType[] @default([VLESS, VMESS, TROJAN, SHADOWSOCKS])
+  /// Optional restriction to specific servers (empty = all servers).
+  allowedServerIds  String[]       @default([])
+  status            PlanStatus     @default(ACTIVE)
+  isDefault         Boolean        @default(false)
+
+  createdById String?
+  createdBy   User?   @relation("PlanOwner", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions Subscription[]
+  /// Users whose currently-assigned plan is this one.
+  users         User[]
+
+  @@index([status])
+  @@map("plans")
+}
+
+model Subscription {
+  id     String  @id @default(cuid())
+  userId String
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId String?
+  plan   Plan?   @relation(fields: [planId], references: [id], onDelete: SetNull)
+
+  serverId String?
+  server   Server? @relation(fields: [serverId], references: [id], onDelete: SetNull)
+
+  quotaType         QuotaType @default(TOTAL)
+  trafficLimitBytes BigInt? // null = unlimited
+  trafficUsedBytes  BigInt    @default(0)
+
+  startsAt DateTime           @default(now())
+  endsAt   DateTime?
+  resetAt  DateTime?
+  status   SubscriptionStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([endsAt])
+  @@map("subscriptions")
+}
+
+// -----------------------------------------------------------------------------
+// Devices
+// -----------------------------------------------------------------------------
+
+model Device {
+  id         String         @id @default(cuid())
+  userId     String
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  platform   DevicePlatform @default(OTHER)
+  status     DeviceStatus   @default(ACTIVE)
+  /// Opaque identifier supplied by the client (never a hardware fingerprint).
+  deviceKey  String?
+  userAgent  String?
+  lastIp     String?
+  lastSeenAt DateTime?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@unique([userId, deviceKey])
+  @@index([userId])
+  @@index([status])
+  @@map("devices")
+}
+
+// -----------------------------------------------------------------------------
+// Traffic accounting
+// -----------------------------------------------------------------------------
+
+/// Source of truth for usage. Written exclusively by the traffic worker / API —
+/// the browser is never trusted for accounting.
+model TrafficUsage {
+  id       String         @id @default(cuid())
+  userId   String?
+  user     User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  serverId String?
+  server   Server?        @relation(fields: [serverId], references: [id], onDelete: SetNull)
+  configId String?
+  config   Configuration? @relation(fields: [configId], references: [id], onDelete: SetNull)
+
+  uploadBytes   BigInt @default(0)
+  downloadBytes BigInt @default(0)
+  totalBytes    BigInt @default(0)
+
+  source    TrafficSource @default(AGENT)
+  /// Marks the collection window so re-runs are idempotent.
+  windowKey String?
+  timestamp DateTime      @default(now())
+
+  @@unique([serverId, userId, configId, windowKey])
+  @@index([userId, timestamp])
+  @@index([serverId, timestamp])
+  @@index([configId, timestamp])
+  @@index([timestamp])
+  @@map("traffic_usage")
+}
+
+// -----------------------------------------------------------------------------
+// Audit, notifications, settings
+// -----------------------------------------------------------------------------
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actor      User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorName  String?
+  action     String
+  targetType String?
+  targetId   String?
+  ip         String?
+  userAgent  String?
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id        String               @id @default(cuid())
+  /// null = broadcast to administrators.
+  userId    String?
+  user      User?                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType     @default(SYSTEM)
+  severity  NotificationSeverity @default(INFO)
+  title     String
+  message   String
+  isRead    Boolean              @default(false)
+  readAt    DateTime?
+  /// Dedupe key so the same alert is not raised twice (e.g. "user:123:80").
+  dedupeKey String?
+  metadata  Json                 @default("{}")
+  createdAt DateTime             @default(now())
+
+  @@unique([dedupeKey])
+  @@index([userId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model SystemSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       Json
+  category    String   @default("general")
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+  @@map("system_settings")
+}

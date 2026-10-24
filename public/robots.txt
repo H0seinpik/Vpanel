@@ -1,0 +1,3 @@
+# VPanel is an administrative panel — it must never be indexed.
+User-agent: *
+Disallow: /

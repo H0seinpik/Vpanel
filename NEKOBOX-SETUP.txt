@@ -1,0 +1,107 @@
+==========================================================================
+ راهنمای اتصال به VPanel با NekoBox / NekoRay / v2raybox / npvtunnel
+==========================================================================
+
+چرا v2rayNG کار میکند ولی این اپها نه؟
+
+گواهی TLS سرور «خودامضا» است. لینک پنل یک فیلد به نام
+pinnedPeerCertSha256 دارد که مخصوص هستهٔ Xray است:
+
+  • v2rayNG از هستهٔ Xray استفاده میکند، این فیلد را میفهمد و گواهی را
+    با آن تأیید میکند  -> کار میکند.
+  • NekoBox / NekoRay / v2raybox از هستهٔ sing-box استفاده میکنند، این
+    فیلد را نمیفهمند، پس گواهی را با مخزن گواهیهای ویندوز/اندروید
+    مقایسه میکنند و چون خودامضا است ردش میکنند.
+
+خطای واقعی که این اپها میدهند:
+  x509: certificate signed by unknown authority
+
+(تست شده با کلاینت واقعی روی همین سرور - هر سه حالت.)
+
+==========================================================================
+راه حل ۱ - سادهترین: Allow Insecure را روشن کن
+==========================================================================
+
+در پروفایل داخل اپ:
+
+  NekoBox / NekoRay :  تیک «Allow Insecure» را بزن
+  v2raybox          :  گزینهٔ Allow Insecure / اجازه ناامن را فعال کن
+
+بعد تست کن. همین احتمالاً کافی است.
+
+نکتهٔ امنیتی: با این کار تأیید گواهی رد میشود، پس یک حملهٔ «مرد میانی»
+از نظر تئوری ممکن میشود. برای امنیت کامل از راه حل ۲ استفاده کن.
+
+==========================================================================
+راه حل ۲ - امنترین: گواهی سرور را در اپ بگذار
+==========================================================================
+
+در پروفایل اپ، فیلدی به نام «Certificate» / «گواهی» / «Cert» را پیدا کن
+(در NekoRay/NekoBox داخل تنظیمات TLS هست) و کل متن زیر را عیناً در آن
+بچسبان. با این کار اپ گواهی سرور را دقیق تأیید میکند و نیازی به
+Allow Insecure نیست.
+
+---------- از این خط کپی کن ----------
+
+-----BEGIN CERTIFICATE-----
+MIIDHzCCAgegAwIBAgIUdAbNb2zfy9Wqm9VWf4zE1+P0A6UwDQYJKoZIhvcNAQEL
+BQAwETEPMA0GA1UEAwwGdnBhbmVsMB4XDTI2MDkyNzA1NTUzOVoXDTM2MDkyNDA1
+NTUzOVowETEPMA0GA1UEAwwGdnBhbmVsMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A
+MIIBCgKCAQEA8xTLAZ8rNYpm3go+Vrghn0XGBh34G1u5UIdOSAN5IdWcAp2kKL0c
+/9GOfJdqVV9iHpXkAtA3ek3KtMl9nZXd1VvkJ6HEhKA2YHoxLyGQ8f9lI9Ko9ROm
+nSHco+CDl67IBmWuFxaYr1LuILK7l9EKcAVVJMLexOZsD7glV2U0AYOcMHUz6nXS
+JxK8FbOnRoF+45UdwTxKdiZgT55CoXeROGU+6eG6K4PSF0diil++njpUv+IPtPmn
+Kjz2G6lTfjRP5ZYhg4VCzuTqXVhDCpaxjc+N9Wp9l5sdFAJ7W+4vWr3doIfm9N7K
+goxo8e84IZdg5Kd/kkaCVeZer1gF6kZh6QIDAQABo28wbTAdBgNVHQ4EFgQU1Zfs
+X8XevccVQkAqoYTeVIzege4wHwYDVR0jBBgwFoAU1ZfsX8XevccVQkAqoYTeVIze
+ge4wDwYDVR0TAQH/BAUwAwEB/zAaBgNVHREEEzARhwTD+PH7gglsb2NhbGhvc3Qw
+DQYJKoZIhvcNAQELBQADggEBAEbP0xXLVIzyEN7wwOx7AFY0bfZWvpl0aC4Di3at
+xXSmdtb4jcsEeJqecsk2czYF+3dcpByCzyFl/XZOPHcX6fxvCG2kwN285ErkgJ2C
+G0GzRnPiKHcVSiqTaUQ96rsXdvX8lFIV/DXgSIQ1aqTF/yOJGblVOIrxvSlmxu8g
+oTOfGhtbyaBD1jIs3wtCzRlHw6vPhitrCQWDmQbIiogK2FIQOIhQ7SAFodwixlQ/
+e9A4h7QmNhZo4EmKL6ZYBWUW29ML421mWWdWHlmyEnjQYYxGvy6R/aqj5JltnEOw
+61qbnJTj0NtfCp/2IalE8IRsIvq9R+H5n3/7VFYb/s4i5as=
+-----END CERTIFICATE-----
+
+---------- تا این خط کپی کن ----------
+
+==========================================================================
+تنظیمات دقیق هر پروفایل (عیناً همینها)
+==========================================================================
+
+همهٔ کانفیگها:
+
+  • Multiplex / Mux  :  خاموش  (با ws سازگار نیست - مهمترین دلیل خرابی)
+  • Fragment         :  خاموش
+
+1) Server 01 · VLESS   (پورت 443)
+   Type = VLESS   |  Transport = ws   |  Security = TLS
+   Path = /        |  SNI = خالی بگذار
+
+2) Server 01 · VLESS   (پورت 433)
+   Type = VLESS   |  Transport = ws   |  Security = TLS
+   Path = /vp_main |  SNI = خالی بگذار
+
+3) Server 01 · VLESS جدید   (پورت 443)
+   Type = VLESS   |  Transport = ws   |  Security = TLS
+   Path = /vp-yo1pxt7o  |  SNI = خالی بگذار
+
+4) Server 01 · SHADOWSOCKS   (پورت 8443)
+   Type = Shadowsocks  |  Method = chacha20-ietf-poly1305
+   Transport = tcp     |  Security = none
+   (این یکی TLS ندارد - بدون هیچ تغییری باید کار کند)
+
+==========================================================================
+اگر باز هم وصل نشد
+==========================================================================
+
+  1. پروفایل را پاک کن و لینک را دوباره import کن (دستی ویرایش نکن).
+  2. چک کن Transport دقیقاً ws باشد نه tcp.
+  3. چک کن Path دقیقاً همان بالا باشد (با / اول و بدون فاصله).
+  4. چک کن Mux خاموش باشد.
+  5. اپ را آپدیت کن و یکبار force-stop کن.
+
+سرور سالم است - هر چهار کانفیگ با کلاینت واقعی تست شده و
+HTTP 200 برمیگردانند.
+
+تاریخ: 2026-09-28

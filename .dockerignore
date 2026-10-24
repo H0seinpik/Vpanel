@@ -1,0 +1,43 @@
+# Dependencies — reinstalled inside the image
+node_modules
+npm-debug.log*
+
+# Build artefacts
+.next
+out
+dist
+build
+*.tsbuildinfo
+
+# Environment & secrets — never bake these into an image
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+docker/nginx/certs/*
+
+# Version control & tooling
+.git
+.gitignore
+.github
+.vscode
+.idea
+
+# Tests & coverage
+coverage
+tests
+
+# Backups — must never be copied into an image
+backups
+*.sql.gz
+*.dump
+
+# Windows control scripts — host-side only, nothing to do with the containers
+windows
+*.bat
+.vpanel
+
+# Docs are small but not needed at runtime
+docs
+README.md

@@ -1,0 +1,133 @@
+# =============================================================================
+# VPanel — full stack
+#
+#   docker compose up -d --build
+#
+# Services: postgres, redis, web (Next.js), worker (background jobs), nginx.
+# Copy .env.example → .env and fill it in before the first run.
+# =============================================================================
+
+name: vpanel
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vpanel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-vpanel}
+      # Deterministic collation so index ordering is stable across hosts.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vpanel} -d ${POSTGRES_DB:-vpanel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - vpanel
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - vpanel
+
+  web:
+    build:
+      context: .
+      target: web
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      # Inside the compose network the database is reachable by service name.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vpanel}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vpanel}?schema=public&connection_limit=10
+      REDIS_URL: redis://redis:6379
+      # The web process must NOT run the scheduler; the worker container does.
+      ENABLE_INLINE_WORKER: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    expose:
+      - "3000"
+    networks:
+      - vpanel
+
+  worker:
+    build:
+      context: .
+      target: worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vpanel}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vpanel}?schema=public&connection_limit=5
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      web:
+        condition: service_started
+    networks:
+      - vpanel
+
+  # One-off tooling container (seed, ad-hoc prisma commands).
+  # Not started by `docker compose up` — invoke it explicitly:
+  #   docker compose run --rm seed
+  seed:
+    build:
+      context: .
+      target: worker
+    profiles: ["tools"]
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vpanel}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vpanel}?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["npx", "tsx", "prisma/seed.ts"]
+    networks:
+      - vpanel
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
+      # Mount your certificates here (see docs/DEPLOYMENT.md § HTTPS).
+      - ./docker/nginx/certs:/etc/nginx/certs:ro
+      - nginx_cache:/var/cache/nginx
+    depends_on:
+      - web
+    networks:
+      - vpanel
+
+volumes:
+  postgres_data:
+  redis_data:
+  nginx_cache:
+
+networks:
+  vpanel:
+    driver: bridge
